@@ -6,6 +6,9 @@ exclude = ["dist"]
 
 [dependencies]
 bevy = { version = "0.15.3", default-features = false, features = ["bevy_asset", "bevy_color", "bevy_gizmos", "bevy_render", "bevy_text", "bevy_window", "bevy_winit", "multi_threaded", "webgl2", "x11"] }
+bevy-world-space = { git = "https://github.com/ClaytonKnittel/bevy-world-space.git", rev = "7a721b5f2b12e50dda44b80c6e2f8af82cc070fa" }
+bitvec = "1.0.1"
+ordered-float = "5.0.0"
 
 [profile.dev.package."*"]
 opt-level = 3

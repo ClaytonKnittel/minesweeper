@@ -5,6 +5,8 @@ use bevy::{
   utils::default,
   window::{PresentMode, Window, WindowPlugin},
 };
+use bevy_world_space::{WorldSpacePlugins, world_init::WorldInitPlugin};
+use minesweeper::minesweeper::MinesweeperPlugin;
 
 fn main() {
   App::new()
@@ -18,5 +20,7 @@ fn main() {
       }),
       ..default()
     }))
+    .add_plugins(WorldSpacePlugins.set(WorldInitPlugin { screen_width: 800., screen_height: 800. }))
+    .add_plugins(MinesweeperPlugin)
     .run();
 }
