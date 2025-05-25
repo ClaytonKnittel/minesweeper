@@ -1,25 +1,32 @@
 use bevy::{
-  app::{App, Plugin, Startup},
-  asset::Assets,
+  app::{App, Plugin, Startup, Update},
+  asset::{Assets, Handle},
   color::Color,
   ecs::{
     component::Component,
-    system::{Commands, Res, ResMut},
+    event::{Event, EventReader, EventWriter},
+    system::{Commands, Query, Res, ResMut, Resource, Single},
   },
-  hierarchy::{BuildChildren, ChildBuild},
+  hierarchy::{BuildChildren, ChildBuild, Children},
+  log::info,
   math::primitives::Rectangle,
-  render::mesh::{Mesh, Mesh2d},
+  render::{
+    mesh::{Mesh, Mesh2d},
+    view::InheritedVisibility,
+  },
   sprite::{ColorMaterial, MeshMaterial2d},
   transform::components::Transform,
 };
 use bevy_world_space::{
+  mouse::MouseEvent,
   position::Position,
   world_unit::{AspectRatio, WorldUnit, WorldVec2},
 };
 use bitvec::{bitvec, order::Lsb0, vec::BitVec};
+use strum::EnumTable;
 
 #[derive(Component)]
-#[require(Transform)]
+#[require(InheritedVisibility, Transform)]
 struct Minesweeper {
   bombs: BitVec<u32>,
   flags: BitVec<u32>,
@@ -42,9 +49,43 @@ impl Minesweeper {
   }
 }
 
+#[derive(Event)]
+enum ClickTile {
+  Uncover { pos: (u32, u32) },
+  PlaceFlag { pos: (u32, u32) },
+}
+
 #[derive(Component)]
 #[require(Transform)]
-struct Tile;
+struct Tile {
+  pos: (u32, u32),
+}
+
+#[derive(EnumTable)]
+enum TileState {
+  Covered,
+  Empty,
+  Flag,
+  Bomb,
+}
+
+#[derive(Resource)]
+struct Resources {
+  colors: TileStateTable<Handle<ColorMaterial>>,
+}
+
+impl Resources {
+  fn initialize(mut materials: ResMut<Assets<ColorMaterial>>) -> Self {
+    Self {
+      colors: TileStateTable::new(
+        materials.add(Color::srgb(0.7, 0.7, 0.7)),
+        materials.add(Color::srgb(0.2, 0.2, 0.2)),
+        materials.add(Color::srgb(0.4, 0.8, 0.3)),
+        materials.add(Color::srgb(0.8, 0.2, 0.1)),
+      ),
+    }
+  }
+}
 
 pub struct MinesweeperPlugin;
 
@@ -53,13 +94,14 @@ impl MinesweeperPlugin {
     mut commands: Commands,
     aspect_ratio: Res<AspectRatio>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    materials: ResMut<Assets<ColorMaterial>>,
   ) {
     const WIDTH: u32 = 10;
     const HEIGHT: u32 = 10;
 
-    let circle = meshes.add(Rectangle::new(1.0, 1.0));
-    let gray = materials.add(Color::srgb(0.7, 0.7, 0.7));
+    let resources = Resources::initialize(materials);
+
+    let square = meshes.add(Rectangle::new(1.0, 1.0));
 
     commands
       .spawn(Minesweeper::empty(WIDTH, HEIGHT))
@@ -67,9 +109,9 @@ impl MinesweeperPlugin {
         for r in 0..WIDTH {
           for c in 0..HEIGHT {
             parent.spawn((
-              Tile,
-              Mesh2d(circle.clone()),
-              MeshMaterial2d(gray.clone()),
+              Tile { pos: (c, r) },
+              Mesh2d(square.clone()),
+              MeshMaterial2d(resources.colors[TileState::Covered].clone_weak()),
               Position::new(
                 WorldVec2::new_normalized(
                   2. * ((c as f32 + 0.5) / WIDTH as f32) - 1.,
@@ -84,11 +126,44 @@ impl MinesweeperPlugin {
           }
         }
       });
+
+    commands.insert_resource(resources);
+  }
+
+  fn handle_click(
+    aspect_ratio: Res<AspectRatio>,
+    resources: Res<Resources>,
+    mut clicks: EventReader<MouseEvent>,
+    mut click_tiles: EventWriter<ClickTile>,
+    minesweeper: Single<&Minesweeper>,
+    mut q_tiles: Query<(&Tile, &mut MeshMaterial2d<ColorMaterial>)>,
+  ) {
+    for click in clicks.read() {
+      if let MouseEvent::LeftClick(pos) = click {
+        let pos = pos.screen_normalized(&aspect_ratio);
+        let x = ((pos.x + 1.) / 2. * minesweeper.width as f32) as u32;
+        let y = ((pos.y + 1.) / 2. * minesweeper.height as f32) as u32;
+        if (0..minesweeper.width).contains(&x) && (0..minesweeper.height).contains(&y) {
+          let pos = (x, y);
+          info!("Clicked {:?}", pos);
+          click_tiles.send(ClickTile::Uncover { pos });
+
+          for (tile, mut color) in &mut q_tiles {
+            if tile.pos == pos {
+              *color = MeshMaterial2d(resources.colors[TileState::Empty].clone_weak());
+            }
+          }
+        }
+      }
+    }
   }
 }
 
 impl Plugin for MinesweeperPlugin {
   fn build(&self, app: &mut App) {
-    app.add_systems(Startup, Self::initialize);
+    app
+      .add_event::<ClickTile>()
+      .add_systems(Startup, Self::initialize)
+      .add_systems(Update, Self::handle_click);
   }
 }
